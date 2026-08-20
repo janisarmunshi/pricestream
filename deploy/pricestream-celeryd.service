@@ -3,8 +3,8 @@ Description=PriceStream celeryd (WS ingestion + committer workers)
 After=network.target postgresql.service redis.service
 
 [Service]
-User=pricestream
-Group=pricestream
+User=worker
+Group=worker
 WorkingDirectory=/opt/pricestream/pricestream
 Environment="PATH=/opt/pricestream/venv/bin"
 # --pool=threads: WS ingestion tasks are long-lived and I/O-bound (WebSocket +

@@ -3,8 +3,8 @@ Description=PriceStream celerybeat (health-check, auto-start supervisor, script 
 After=network.target postgresql.service redis.service
 
 [Service]
-User=pricestream
-Group=pricestream
+User=worker
+Group=worker
 WorkingDirectory=/opt/pricestream/pricestream
 Environment="PATH=/opt/pricestream/venv/bin"
 ExecStart=/opt/pricestream/venv/bin/celery -A config beat \
