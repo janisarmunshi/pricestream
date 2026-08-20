@@ -8,7 +8,7 @@ Group=worker
 WorkingDirectory=/opt/pricestream/pricestream
 Environment="PATH=/opt/pricestream/venv/bin"
 ExecStart=/opt/pricestream/venv/bin/gunicorn config.wsgi:application \
-    --bind 127.0.0.1:8000 \
+    --bind 127.0.0.1:8002 \
     --workers 3 \
     --timeout 60
 Restart=on-failure

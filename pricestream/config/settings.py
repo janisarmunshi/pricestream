@@ -24,6 +24,13 @@ DEBUG = env('DEBUG')
 
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['127.0.0.1', 'localhost'])
 
+# Served under a path prefix (marketmantra.tech/pricestream), not at domain root —
+# nginx strips the prefix before proxying (proxy_pass .../ with a trailing slash),
+# so Django must add it back onto every URL/static path it generates.
+FORCE_SCRIPT_NAME = env('FORCE_SCRIPT_NAME', default=None)
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
