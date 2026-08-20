@@ -1,0 +1,62 @@
+{% extends "pricestream/base.html" %}
+{% block title %}Instrument Manager — PriceStream{% endblock %}
+{% block content %}
+<h1>Instrument Manager</h1>
+
+{% if not accounts %}
+<p>No broker accounts yet. <a href="{% url 'account_create' %}">Add one</a> first.</p>
+{% else %}
+
+<div class="card">
+    <form method="get">
+        <label>Account:
+            <select name="account_id" onchange="this.form.submit()">
+                {% for account in accounts %}
+                <option value="{{ account.id }}" {% if account.id == account_id %}selected{% endif %}>{{ account.nickname }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <input type="text" name="q" placeholder="Search symbol..." value="{{ search }}">
+        <button class="btn" type="submit">Search</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Bulk CSV import (columns: token or symbol)</h3>
+    <form method="post" enctype="multipart/form-data" action="{% url 'bulk_import' account_id %}">
+        {% csrf_token %}
+        <input type="file" name="csv_file" accept=".csv">
+        <button class="btn" type="submit">Import</button>
+    </form>
+</div>
+
+<table>
+    <thead>
+        <tr><th>Symbol</th><th>Exchange</th><th>Token</th><th>Name</th><th>Expiry</th><th>Subscribed</th></tr>
+    </thead>
+    <tbody>
+        {% for script in scripts %}
+        <tr>
+            <td>{{ script.symbol }}</td>
+            <td>{{ script.exch_seg }}</td>
+            <td>{{ script.token }}</td>
+            <td>{{ script.name }}</td>
+            <td>{{ script.expiry|default:"—" }}</td>
+            <td>
+                <form method="post" action="{% url 'toggle_subscription' account_id script.id %}">
+                    {% csrf_token %}
+                    {% if script.token in subscribed_tokens %}
+                    <button class="btn btn-primary" type="submit">Enabled</button>
+                    {% else %}
+                    <button class="btn" type="submit">Enable</button>
+                    {% endif %}
+                </form>
+            </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">No instruments found. Run the daily script sync first.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}

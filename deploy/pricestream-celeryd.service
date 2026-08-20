@@ -1,0 +1,28 @@
+[Unit]
+Description=PriceStream celeryd (WS ingestion + committer workers)
+After=network.target postgresql.service redis.service
+
+[Service]
+User=pricestream
+Group=pricestream
+WorkingDirectory=/opt/pricestream/pricestream
+Environment="PATH=/opt/pricestream/venv/bin"
+# --pool=threads: WS ingestion tasks are long-lived and I/O-bound (WebSocket +
+# Redis), not CPU-bound — threads let many accounts' tasks run concurrently in one
+# worker without the process-per-task overhead prefork would add. Concurrency
+# should be sized to (number of active broker accounts + a few for committer/beat
+# tasks); bump as accounts are added.
+ExecStart=/opt/pricestream/venv/bin/celery -A config worker \
+    --loglevel=info \
+    --pool=threads \
+    --concurrency=20
+# Graceful shutdown reduces the un-persisted window during planned restarts, but is
+# NOT itself the zero-loss guarantee (a SIGTERM handler never runs on kill -9, OOM,
+# or power loss) — durability comes from XADD at write time, see apps.streaming.tasks.
+ExecStop=/opt/pricestream/venv/bin/celery -A config control shutdown
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

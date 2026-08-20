@@ -1,0 +1,16 @@
+[Unit]
+Description=PriceStream celerybeat (health-check, auto-start supervisor, script sync)
+After=network.target postgresql.service redis.service
+
+[Service]
+User=pricestream
+Group=pricestream
+WorkingDirectory=/opt/pricestream/pricestream
+Environment="PATH=/opt/pricestream/venv/bin"
+ExecStart=/opt/pricestream/venv/bin/celery -A config beat \
+    --loglevel=info \
+    --scheduler django_celery_beat.schedulers:DatabaseScheduler
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

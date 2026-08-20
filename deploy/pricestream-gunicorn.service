@@ -1,0 +1,17 @@
+[Unit]
+Description=PriceStream gunicorn (admin/frontend web app)
+After=network.target postgresql.service redis.service
+
+[Service]
+User=pricestream
+Group=pricestream
+WorkingDirectory=/opt/pricestream/pricestream
+Environment="PATH=/opt/pricestream/venv/bin"
+ExecStart=/opt/pricestream/venv/bin/gunicorn config.wsgi:application \
+    --bind 127.0.0.1:8000 \
+    --workers 3 \
+    --timeout 60
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

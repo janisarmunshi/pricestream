@@ -1,0 +1,34 @@
+{% extends "pricestream/base.html" %}
+{% block title %}Settings — PriceStream{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+{% for account in accounts %}
+{% with config=account.streaming_config %}
+<div class="card">
+    <h3>{{ account.nickname }}</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="account_id" value="{{ account.id }}">
+        <p>
+            <label>Batch size <input type="number" name="batch_size" value="{{ config.batch_size|default:500 }}"></label>
+        </p>
+        <p>
+            <label>Flush interval (s) <input type="number" step="0.1" name="flush_interval_seconds" value="{{ config.flush_interval_seconds|default:2.0 }}"></label>
+        </p>
+        <p>
+            <label>Retention (days) <input type="number" name="retention_days" value="{{ config.retention_days|default:365 }}"></label>
+        </p>
+        <p>
+            <label>Compress after (days) <input type="number" name="compress_after_days" value="{{ config.compress_after_days|default:7 }}"></label>
+        </p>
+        <p>
+            <label>Alert lag threshold (s) <input type="number" name="alert_lag_seconds" value="{{ config.alert_lag_seconds|default:60 }}"></label>
+        </p>
+        <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+</div>
+{% endwith %}
+{% empty %}
+<p>No broker accounts yet.</p>
+{% endfor %}
+{% endblock %}

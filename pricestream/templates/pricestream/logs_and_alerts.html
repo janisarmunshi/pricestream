@@ -1,0 +1,22 @@
+{% extends "pricestream/base.html" %}
+{% block title %}Logs & Alerts — PriceStream{% endblock %}
+{% block content %}
+<h1>Logs &amp; Alerts</h1>
+<table>
+    <thead>
+        <tr><th>Time</th><th>Account</th><th>Type</th><th>Message</th></tr>
+    </thead>
+    <tbody>
+        {% for event in events %}
+        <tr>
+            <td>{{ event.created_at }}</td>
+            <td>{{ event.account_id }}</td>
+            <td>{{ event.event_type }}</td>
+            <td>{{ event.message }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4">No events logged yet.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends "pricestream/base.html" %}
+{% block title %}Data Explorer — PriceStream{% endblock %}
+{% block content %}
+<h1>Data Explorer</h1>
+<div class="card">
+    <form method="get">
+        <label>Account:
+            <select name="account_id">
+                <option value="">—</option>
+                {% for account in accounts %}
+                <option value="{{ account.id }}">{{ account.nickname }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <input type="text" name="token" placeholder="Token (optional)">
+        <input type="datetime-local" name="start">
+        <input type="datetime-local" name="end">
+        <button class="btn btn-primary" type="submit">Query</button>
+    </form>
+</div>
+
+<table>
+    <thead>
+        <tr><th>Time</th><th>Account</th><th>Exchange</th><th>Token</th><th>Symbol</th><th>LTP</th><th>Volume</th></tr>
+    </thead>
+    <tbody>
+        {% for tick in ticks %}
+        <tr>
+            <td>{{ tick.time }}</td>
+            <td>{{ tick.account_id }}</td>
+            <td>{{ tick.exch_seg }}</td>
+            <td>{{ tick.token }}</td>
+            <td>{{ tick.symbol }}</td>
+            <td>{{ tick.ltp }}</td>
+            <td>{{ tick.volume }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7">Select an account and query to see ticks.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

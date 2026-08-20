@@ -1,0 +1,41 @@
+{% extends "pricestream/base.html" %}
+{% block title %}Broker Accounts — PriceStream{% endblock %}
+{% block content %}
+<h1>Broker Accounts</h1>
+<p><a class="btn btn-primary" href="{% url 'account_create' %}">+ Add broker account</a></p>
+<table>
+    <thead>
+        <tr><th>Nickname</th><th>Client ID</th><th>Broker</th><th>Active</th><th>Last login</th><th>Actions</th></tr>
+    </thead>
+    <tbody>
+        {% for account in accounts %}
+        <tr>
+            <td>{{ account.nickname }}</td>
+            <td>{{ account.client_id }}</td>
+            <td>{{ account.get_broker_display }}</td>
+            <td>{{ account.is_active|yesno:"Yes,No" }}</td>
+            <td>
+                {{ account.last_login_status|default:"—" }}
+                {% if account.last_login_at %}({{ account.last_login_at }}){% endif %}
+                {% if account.last_login_error %}<br><small style="color:#f85149">{{ account.last_login_error }}</small>{% endif %}
+            </td>
+            <td>
+                <a class="btn" href="{% url 'account_edit' account.id %}">Edit</a>
+                <form class="inline" method="post" action="{% url 'account_test_login' account.id %}">
+                    {% csrf_token %}<button class="btn" type="submit">Test connection</button>
+                </form>
+                <form class="inline" method="post" action="{% url 'account_test_login' account.id %}">
+                    {% csrf_token %}<input type="hidden" name="force" value="1">
+                    <button class="btn" type="submit">Force relogin</button>
+                </form>
+                <form class="inline" method="post" action="{% url 'account_delete' account.id %}" onsubmit="return confirm('Delete this account?');">
+                    {% csrf_token %}<button class="btn" type="submit">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">No broker accounts yet.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

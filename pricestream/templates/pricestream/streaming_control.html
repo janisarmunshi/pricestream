@@ -1,0 +1,38 @@
+{% extends "pricestream/base.html" %}
+{% block title %}Streaming Control — PriceStream{% endblock %}
+{% block content %}
+<h1>Streaming Control</h1>
+{% for account in accounts %}
+<div class="card">
+    <h3>
+        {{ account.nickname }}
+        {% with setting=account.streaming_setting %}
+        {% if setting.actual_state == 'RUNNING' %}<span class="badge badge-running">Running</span>
+        {% elif setting.actual_state == 'PAUSED' %}<span class="badge badge-paused">Paused</span>
+        {% else %}<span class="badge badge-stopped">Stopped</span>{% endif %}
+        {% endwith %}
+    </h3>
+    <form class="inline" method="post" action="{% url 'streaming_action' account.id %}">
+        {% csrf_token %}<input type="hidden" name="action" value="start">
+        <button class="btn btn-primary" type="submit">Start</button>
+    </form>
+    <form class="inline" method="post" action="{% url 'streaming_action' account.id %}">
+        {% csrf_token %}<input type="hidden" name="action" value="pause">
+        <button class="btn" type="submit">Pause</button>
+    </form>
+    <form class="inline" method="post" action="{% url 'streaming_action' account.id %}">
+        {% csrf_token %}<input type="hidden" name="action" value="stop">
+        <button class="btn" type="submit">Stop</button>
+    </form>
+
+    <p style="margin-top:0.75rem;color:#8b949e;">
+        Active subscriptions:
+        {% for sub in account.subscriptions.all %}
+            {% if sub.is_enabled %}{{ sub.script.symbol }}{% if not forloop.last %}, {% endif %}{% endif %}
+        {% empty %}none{% endfor %}
+    </p>
+</div>
+{% empty %}
+<p>No broker accounts yet.</p>
+{% endfor %}
+{% endblock %}

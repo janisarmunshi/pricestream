@@ -1,0 +1,56 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}PriceStream{% endblock %}</title>
+    <style>
+        :root { color-scheme: light dark; }
+        body { font-family: system-ui, sans-serif; margin: 0; background: #0d1117; color: #e6edf3; }
+        nav { display: flex; gap: 1rem; padding: 0.75rem 1.25rem; background: #161b22; border-bottom: 1px solid #30363d; align-items: center; }
+        nav a { color: #c9d1d9; text-decoration: none; font-size: 0.9rem; }
+        nav a:hover { color: #58a6ff; }
+        nav .brand { font-weight: 600; color: #58a6ff; margin-right: 1rem; }
+        main { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+        table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+        th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #30363d; font-size: 0.9rem; }
+        th { color: #8b949e; font-weight: 600; }
+        .btn { display: inline-block; padding: 0.35rem 0.75rem; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; cursor: pointer; font-size: 0.85rem; text-decoration: none; }
+        .btn:hover { background: #30363d; }
+        .btn-primary { background: #238636; border-color: #2ea043; color: white; }
+        .badge { padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; }
+        .badge-running { background: #238636; color: white; }
+        .badge-stopped { background: #6e7681; color: white; }
+        .badge-paused { background: #9e6a03; color: white; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+        form.inline { display: inline; }
+        input, select { background: #0d1117; border: 1px solid #30363d; color: #e6edf3; border-radius: 6px; padding: 0.35rem 0.5rem; }
+        .messages { list-style: none; padding: 0; margin: 0 0 1rem; }
+        .messages li { padding: 0.5rem 0.75rem; border-radius: 6px; margin-bottom: 0.5rem; background: #21262d; }
+    </style>
+</head>
+<body>
+    <nav>
+        <span class="brand">PriceStream</span>
+        <a href="{% url 'dashboard' %}">Dashboard</a>
+        <a href="{% url 'account_list' %}">Broker Accounts</a>
+        <a href="{% url 'instrument_manager' %}">Instruments</a>
+        <a href="{% url 'streaming_control' %}">Streaming</a>
+        <a href="{% url 'data_explorer' %}">Data Explorer</a>
+        <a href="{% url 'settings' %}">Settings</a>
+        <a href="{% url 'logs_and_alerts' %}">Logs &amp; Alerts</a>
+        {% if user.is_authenticated %}
+            <span style="margin-left:auto"></span>
+            <form action="{% url 'logout' %}" method="post" class="inline">{% csrf_token %}<button class="btn" type="submit">Logout ({{ user.username }})</button></form>
+        {% endif %}
+    </nav>
+    <main>
+        {% if messages %}
+        <ul class="messages">
+            {% for message in messages %}<li>{{ message }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

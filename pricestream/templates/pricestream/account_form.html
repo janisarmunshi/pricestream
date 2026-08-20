@@ -1,0 +1,13 @@
+{% extends "pricestream/base.html" %}
+{% block title %}{{ instance|yesno:"Edit,Add" }} Broker Account — PriceStream{% endblock %}
+{% block content %}
+<h1>{% if instance %}Edit{% else %}Add{% endif %} Broker Account</h1>
+<div class="card" style="max-width:480px;">
+    <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button class="btn btn-primary" type="submit">Save</button>
+        <a class="btn" href="{% url 'account_list' %}">Cancel</a>
+    </form>
+</div>
+{% endblock %}
