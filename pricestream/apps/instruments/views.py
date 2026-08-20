@@ -4,6 +4,7 @@ import io
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from apps.accounts.models import BrokerAccount
@@ -52,7 +53,7 @@ def toggle_subscription(request, account_id, script_id):
         sub.is_enabled = not sub.is_enabled
         sub.save(update_fields=['is_enabled'])
 
-    return redirect(f"/instruments/?account_id={account_id}")
+    return redirect(f"{reverse('instrument_manager')}?account_id={account_id}")
 
 
 @login_required
@@ -65,7 +66,7 @@ def bulk_import(request, account_id):
     csv_file = request.FILES.get('csv_file')
     if not csv_file:
         messages.error(request, 'No file uploaded.')
-        return redirect(f"/instruments/?account_id={account_id}")
+        return redirect(f"{reverse('instrument_manager')}?account_id={account_id}")
 
     reader = csv.DictReader(io.TextIOWrapper(csv_file.file, encoding='utf-8'))
     created_count = 0
@@ -89,4 +90,4 @@ def bulk_import(request, account_id):
     if missing:
         messages.warning(request, f"Not found: {', '.join(missing[:20])}")
 
-    return redirect(f"/instruments/?account_id={account_id}")
+    return redirect(f"{reverse('instrument_manager')}?account_id={account_id}")
