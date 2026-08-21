@@ -23,9 +23,21 @@ def account_edit(request, account_id=None):
         if form.is_valid():
             account = form.save(commit=False)
             account.owner = request.user
-            account.save()
-            messages.success(request, f'Saved {account.nickname}.')
-            return redirect('account_list')
+            # owner isn't a form field, so form.is_valid() never checked the real
+            # (owner, client_id, broker) uniqueness — validate it here instead of
+            # letting a duplicate reach the DB as a raw IntegrityError/500.
+            duplicate = BrokerAccount.objects.filter(
+                owner=request.user, client_id=account.client_id, broker=account.broker,
+            ).exclude(pk=account.pk)
+            if duplicate.exists():
+                form.add_error(
+                    'client_id',
+                    f'You already have a {account.get_broker_display()} account with client ID "{account.client_id}".',
+                )
+            else:
+                account.save()
+                messages.success(request, f'Saved {account.nickname}.')
+                return redirect('account_list')
     else:
         form = BrokerAccountForm(instance=instance)
 
