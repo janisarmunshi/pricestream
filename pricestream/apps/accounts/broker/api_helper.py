@@ -5,6 +5,12 @@ and OAuth header injection for the WebSocket auth path.
 Ported from Yantra's trading/Entities/Brokers/api_helper.py, trimmed of everything
 related to placing/modifying orders (place_order, place_basket, Order class) — this
 project only ever reads ticks, never trades.
+
+NorenRestApiPy is vendored under apps/accounts/broker/NorenRestApiPy/ (a straight
+copy of Yantra's own site-packages copy) rather than installed from PyPI: the public
+NorenRestApiPy package on PyPI does NOT have getAccessToken/gen_acs_tok — those only
+exist in Finvasia's separately-distributed OAuth-enabled client, which is what
+Yantra actually uses. There is no PyPI package for this variant.
 """
 import logging as _logging
 import os
@@ -12,8 +18,8 @@ import threading as _threading
 from urllib.parse import quote as _url_quote
 
 import requests as _requests
-from NorenRestApiPy.NorenApi import NorenApi
-import NorenRestApiPy.NorenApi as _noren_module
+from apps.accounts.broker.NorenRestApiPy.NorenApi import NorenApi
+import apps.accounts.broker.NorenRestApiPy.NorenApi as _noren_module
 
 _api_logger = _logging.getLogger(__name__)
 

@@ -11,7 +11,8 @@ redis==5.2.1
 psycopg2==2.9.10
 
 pyotp==2.9.0
-NorenRestApiPy==0.0.22
+requests==2.34.2
+websocket-client==1.9.0
 selenium==4.27.1
 
 pandas==2.2.3
