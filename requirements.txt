@@ -13,7 +13,6 @@ psycopg2==2.9.10
 pyotp==2.9.0
 NorenRestApiPy==0.0.22
 selenium==4.27.1
-webdriver-manager==4.0.2
 
 pandas==2.2.3
 pytz==2024.2

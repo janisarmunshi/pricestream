@@ -13,13 +13,10 @@ Kept as-is because they're proven in production:
   that close_callback alone would never see.
 """
 import logging
-import os
 import platform
 import shutil
 import tempfile
-import threading
 import time
-from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 import pyotp
@@ -33,44 +30,20 @@ logger = logging.getLogger(__name__)
 
 _IS_WINDOWS = platform.system() == 'Windows'
 
-_chromedriver_path: Optional[str] = None
-_chromedriver_thread_lock = threading.Lock()
-
 
 def _get_chrome_service():
-    """Return a configured Chrome Service, safe for concurrent processes.
+    """Return None so Selenium Manager (built into Selenium 4.6+) resolves the
+    chromedriver binary itself, on every platform.
 
-    Windows: return None so Selenium Manager resolves the driver itself.
-    Linux: use webdriver_manager with a file lock so parallel Celery worker
-    processes serialise the download step — first process downloads, the rest
-    wait and reuse the cached binary.
+    webdriver_manager was tried here first but is unreliable against modern Chrome
+    (115+, which moved to the Chrome-for-Testing distribution channel) — it can
+    resolve/cache a chromedriver version that doesn't match the installed Chrome,
+    which fails at launch with "Chrome failed to start ... DevToolsActivePort file
+    doesn't exist", a mismatch error rather than a real crash. Selenium Manager reads
+    the actually-installed Chrome's version and fetches the matching driver, which is
+    both simpler and correct.
     """
-    if _IS_WINDOWS:
-        return None
-
-    from selenium.webdriver.chrome.service import Service
-    from webdriver_manager.chrome import ChromeDriverManager
-
-    global _chromedriver_path
-
-    if _chromedriver_path and os.path.isfile(_chromedriver_path):
-        return Service(_chromedriver_path)
-
-    with _chromedriver_thread_lock:
-        if _chromedriver_path and os.path.isfile(_chromedriver_path):
-            return Service(_chromedriver_path)
-
-        import fcntl  # type: ignore[import]
-        lock_path = '/tmp/.chromedriver_install.lock'
-        with open(lock_path, 'w') as lf:
-            fcntl.flock(lf, fcntl.LOCK_EX)
-            try:
-                _chromedriver_path = ChromeDriverManager().install()
-                logger.info(f'chromedriver ready: {_chromedriver_path}')
-            finally:
-                fcntl.flock(lf, fcntl.LOCK_UN)
-
-    return Service(_chromedriver_path)
+    return None
 
 
 def _build_chrome_options(profile_dir: str):
