@@ -8,8 +8,11 @@ class Script(models.Model):
     """
 
     token = models.CharField(max_length=40, db_index=True)
+    # The full tradable contract code (e.g. SILVERMIC31AUG26), not the base name
+    # (SILVERMIC) — this is what the broker's WS subscribe and every other lookup
+    # actually needs. PriceStream is Finvasia-only, so there is no separate
+    # per-broker symbol field to reconcile.
     symbol = models.CharField(max_length=40, db_index=True)
-    symbol_finvasia = models.CharField(max_length=40, default='')
     name = models.CharField(max_length=80, default='')
     exch_seg = models.CharField(max_length=10, db_index=True)
 

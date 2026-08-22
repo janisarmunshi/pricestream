@@ -56,16 +56,19 @@ def sync_exchange(exch_seg: str) -> int:
             count = 0
             for row in reader:
                 token = row.get('Token') or row.get('token')
-                symbol = row.get('Symbol') or row.get('symbol')
-                if not token or not symbol:
+                base_symbol = row.get('Symbol') or row.get('symbol')
+                if not token or not base_symbol:
                     continue
 
-                trading_symbol = row.get('TradingSymbol') or symbol
+                # Use the full tradable contract code (TradingSymbol) as `symbol`
+                # everywhere — SILVERMIC31AUG26, not the truncated base name
+                # SILVERMIC. Falls back to the base name only for instruments that
+                # genuinely have no separate trading symbol (plain equities).
+                trading_symbol = row.get('TradingSymbol') or base_symbol
                 Script.objects.update_or_create(
                     exch_seg=exch_seg, token=token,
                     defaults={
-                        'symbol': symbol,
-                        'symbol_finvasia': trading_symbol,
+                        'symbol': trading_symbol,
                         'name': row.get('Instrument') or row.get('Name') or '',
                         'expiry': row.get('Expiry') or '',
                         'expiry_date': _parse_expiry_date(row.get('Expiry')),

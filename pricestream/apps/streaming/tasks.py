@@ -53,7 +53,7 @@ def _current_subscriptions(account_id):
         .select_related('script')
     )
     return [
-        {'exchange': row.script.exch_seg, 'token': row.script.token, 'symbol': row.script.symbol_finvasia or row.script.symbol}
+        {'exchange': row.script.exch_seg, 'token': row.script.token, 'symbol': row.script.symbol}
         for row in rows
     ]
 
