@@ -26,6 +26,10 @@ app.conf.beat_schedule = {
         'task': 'apps.instruments.tasks.sync_script_master',
         'schedule': crontab(hour=6, minute=0),
     },
+    'hourly-expired-script-cleanup': {
+        'task': 'apps.instruments.tasks.sync_expired_scripts',
+        'schedule': crontab(minute=0),
+    },
 }
 
 

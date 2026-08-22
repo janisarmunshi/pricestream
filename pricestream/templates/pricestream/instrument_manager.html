@@ -16,15 +16,28 @@
                 {% endfor %}
             </select>
         </label>
+        <label>Exchange:
+            <select name="exch_seg" onchange="this.form.submit()">
+                <option value="">Select an exchange…</option>
+                {% for exch in exchanges %}
+                <option value="{{ exch }}" {% if exch == exch_seg %}selected{% endif %}>{{ exch }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        {% if exch_seg %}
         <input type="text" name="q" placeholder="Search symbol..." value="{{ search }}">
         <button class="btn" type="submit">Search</button>
+        {% endif %}
+        <input type="hidden" name="account_id" value="{{ account_id }}">
     </form>
 </div>
 
+{% if exch_seg %}
 <div class="card">
-    <h3>Bulk CSV import (columns: token or symbol)</h3>
+    <h3>Bulk CSV import for {{ exch_seg }} (columns: token or symbol)</h3>
     <form method="post" enctype="multipart/form-data" action="{% url 'bulk_import' account_id %}">
         {% csrf_token %}
+        <input type="hidden" name="exch_seg" value="{{ exch_seg }}">
         <input type="file" name="csv_file" accept=".csv">
         <button class="btn" type="submit">Import</button>
     </form>
@@ -32,19 +45,19 @@
 
 <table>
     <thead>
-        <tr><th>Symbol</th><th>Exchange</th><th>Token</th><th>Name</th><th>Expiry</th><th>Subscribed</th></tr>
+        <tr><th>Symbol</th><th>Token</th><th>Name</th><th>Expiry</th><th>Subscribed</th></tr>
     </thead>
     <tbody>
         {% for script in scripts %}
         <tr>
             <td>{{ script.symbol }}</td>
-            <td>{{ script.exch_seg }}</td>
             <td>{{ script.token }}</td>
             <td>{{ script.name }}</td>
             <td>{{ script.expiry|default:"—" }}</td>
             <td>
                 <form method="post" action="{% url 'toggle_subscription' account_id script.id %}">
                     {% csrf_token %}
+                    <input type="hidden" name="exch_seg" value="{{ exch_seg }}">
                     {% if script.token in subscribed_tokens %}
                     <button class="btn btn-primary" type="submit">Enabled</button>
                     {% else %}
@@ -54,9 +67,12 @@
             </td>
         </tr>
         {% empty %}
-        <tr><td colspan="6">No instruments found. Run the daily script sync first.</td></tr>
+        <tr><td colspan="5">No instruments found for {{ exch_seg }}. Run the daily script sync first.</td></tr>
         {% endfor %}
     </tbody>
 </table>
+{% else %}
+<p>Select an exchange above to see its instruments.</p>
+{% endif %}
 {% endif %}
 {% endblock %}

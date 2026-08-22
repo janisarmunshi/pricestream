@@ -11,6 +11,7 @@ import zipfile
 from datetime import datetime
 
 import requests
+from django.utils import timezone
 
 from apps.instruments.models import Script
 
@@ -80,11 +81,26 @@ def sync_exchange(exch_seg: str) -> int:
     return count
 
 
+def delete_expired_scripts() -> int:
+    """Remove scripts whose expiry has already passed. Ported from Yantra's
+    MasterDataManager.syncSymbols(), which runs this both before and after the sync
+    so a stale expired contract is never left subscribable and a freshly-synced one
+    that turns out already-expired doesn't linger either.
+    """
+    today = timezone.now().date()
+    deleted_count, _ = Script.objects.filter(expiry_date__lt=today).delete()
+    if deleted_count:
+        logger.info(f'[SCRIPT-SYNC] deleted {deleted_count} expired scripts')
+    return deleted_count
+
+
 def sync_all_exchanges():
+    delete_expired_scripts()
     total = 0
     for exch_seg in SYMBOL_MASTER_URLS:
         try:
             total += sync_exchange(exch_seg)
         except Exception as e:
             logger.error(f'[SCRIPT-SYNC] {exch_seg} sync failed: {e}', exc_info=True)
+    delete_expired_scripts()
     return total
