@@ -26,7 +26,7 @@ from celery import shared_task
 from django.conf import settings
 from django.utils import timezone
 
-from apps.accounts.broker.exchange_sessions import is_any_market_day_active
+from apps.accounts.broker.exchange_sessions import is_any_market_day_active, is_market_open
 from apps.accounts.broker.finvasia import FinvasiaConnector
 from apps.accounts.models import BrokerAccount
 from apps.streaming.models import StreamingSetting, Subscription
@@ -65,6 +65,27 @@ def _subscribed_exchanges(account_id):
         .values_list('script__exch_seg', flat=True)
         .distinct()
     )
+
+
+# Minimum time between two resubscribes for the same account. A resubscribe closes
+# and reopens the broker WS, which takes a real round-trip to settle — retriggering
+# within that window (e.g. two health-check ticks queuing up before the first
+# reconnect finishes) tears down a connection that just came up, rather than fixing
+# anything. Deliberately longer than WS_HEALTH_CHECK_INTERVAL so at least one full
+# health-check cycle elapses (with fresh ticks flowing) before silence is re-evaluated.
+_RESUBSCRIBE_COOLDOWN_SECONDS = 30
+
+
+def _resubscribe_cooldown_key(account_id):
+    return f'ps:ws:resubscribe_cooldown:{account_id}'
+
+
+def _resubscribe_cooldown_ok(r, account_id):
+    return not r.exists(_resubscribe_cooldown_key(account_id))
+
+
+def _mark_resubscribed(r, account_id):
+    r.set(_resubscribe_cooldown_key(account_id), '1', ex=_RESUBSCRIBE_COOLDOWN_SECONDS)
 
 
 class _TickBuffer:
@@ -198,29 +219,49 @@ def ingest_account_ticks(self, account_id):
             buffer.flush()
 
             idle_cycles += 1
-            if idle_cycles % health_check_cycles == 0 and not connector.isWsConnected():
+            if (
+                idle_cycles % health_check_cycles == 0
+                and not connector.isWsConnected()
+                and _resubscribe_cooldown_ok(r, account_id)
+            ):
                 idle_secs = connector.wsIdleSeconds()
                 reason = f'connection flag reports disconnected (idle {idle_secs:.1f}s)'
                 logger.warning(f'[WS-ING] account={account_id} {reason} — resubscribing')
                 fresh_subscriptions = _current_subscriptions(account_id)
                 refresh_symbol_map(fresh_subscriptions)
                 connector.resubscribe_websocket(fresh_subscriptions)
+                _mark_resubscribed(r, account_id)
                 SystemEvent.log(account_id, SystemEvent.TYPE_RESUBSCRIBE, reason)
 
-            msg = control_pubsub.get_message(timeout=0.5)
-            if msg and msg.get('type') == 'message':
-                try:
-                    payload = json.loads(msg['data'])
-                except (TypeError, ValueError):
-                    payload = {}
-                if payload.get('action') == 'resubscribe':
+            # Drain every queued control message and act on only the last one — a
+            # resubscribe takes long enough (close + reopen + broker round-trip)
+            # that several health-check ticks can queue up requests before the first
+            # one finishes; replaying each in turn tears down a connection that just
+            # came up milliseconds earlier (observed as "Connection is already
+            # closed" / "'NoneType' object has no attribute 'sock'" in production).
+            latest_payload = None
+            while True:
+                msg = control_pubsub.get_message(timeout=0.5 if latest_payload is None else 0)
+                if not msg:
+                    break
+                if msg.get('type') == 'message':
+                    try:
+                        latest_payload = json.loads(msg['data'])
+                    except (TypeError, ValueError):
+                        pass
+
+            if latest_payload and latest_payload.get('action') == 'resubscribe':
+                if _resubscribe_cooldown_ok(r, account_id):
                     logger.warning(
-                        f"[WS-ING] account={account_id} resubscribe requested: {payload.get('reason', '')}"
+                        f"[WS-ING] account={account_id} resubscribe requested: {latest_payload.get('reason', '')}"
                     )
                     fresh_subscriptions = _current_subscriptions(account_id)
                     refresh_symbol_map(fresh_subscriptions)
                     connector.resubscribe_websocket(fresh_subscriptions)
-                    SystemEvent.log(account_id, SystemEvent.TYPE_RESUBSCRIBE, payload.get('reason', ''))
+                    _mark_resubscribed(r, account_id)
+                    SystemEvent.log(account_id, SystemEvent.TYPE_RESUBSCRIBE, latest_payload.get('reason', ''))
+                else:
+                    logger.debug(f'[WS-ING] account={account_id} resubscribe request ignored — still in cooldown')
     except Exception as e:
         logger.error(f'[WS-ING] account={account_id} error: {e}', exc_info=True)
         SystemEvent.log(account_id, SystemEvent.TYPE_ERROR, str(e))
@@ -243,11 +284,18 @@ def ws_health_check(self):
     """Beat task every ~5s (settings.WS_HEALTH_CHECK_INTERVAL). Second resilience
     layer on top of the connection-flag check already running inside
     ingest_account_ticks: resubscribe if the ownership lock is missing (the
-    ingestion task died) OR if any individually subscribed instrument has gone quiet
-    beyond TICK_SILENCE_THRESHOLD_SECONDS — this catches a socket that looks
-    "connected" but has silently stopped receiving a subset of this account's
-    subscriptions specifically (e.g. a server-side resubscribe that dropped some
-    tokens), which the connection flag alone would never surface.
+    ingestion task died) OR if any subscribed instrument WHOSE EXCHANGE IS CURRENTLY
+    OPEN has gone quiet beyond TICK_SILENCE_THRESHOLD_SECONDS — this catches a socket
+    that looks "connected" but has silently stopped receiving a subset of this
+    account's subscriptions specifically (e.g. a server-side resubscribe that dropped
+    some tokens), which the connection flag alone would never surface. Instruments on
+    a closed exchange (e.g. NSE/BSE after 15:30 while an MCX contract on the same
+    account keeps trading until 23:55) are excluded from the silence check entirely —
+    their silence is expected, not a dead feed.
+
+    A resubscribe just requested (still within _RESUBSCRIBE_COOLDOWN_SECONDS) is
+    never re-flagged — the new connection needs a real chance to start ticking again
+    before its own silence is judged.
 
     This process doesn't hold the live FinvasiaConnector for a running ingestion task
     (that object lives inside the ingest_account_ticks worker process/thread), so it
@@ -267,16 +315,23 @@ def ws_health_check(self):
         if not r.exists(ws_lock_key(account_id)):
             needs_resubscribe = True
             reason = 'ownership lock missing (task likely died)'
+        elif not _resubscribe_cooldown_ok(r, account_id):
+            pass  # a resubscribe just happened; give the new connection time to tick
         else:
-            subscribed_tokens = (
+            # Only tokens whose exchange is CURRENTLY in session can be judged "gone
+            # quiet" — NSE/BSE closing at 15:30 while an MCX contract on the same
+            # account keeps ticking until 23:55 is completely normal, not a dead feed.
+            subscribed = (
                 Subscription.objects.filter(account_id=account_id, is_enabled=True)
-                .values_list('script__token', flat=True)
+                .values_list('script__token', 'script__exch_seg')
             )
+            live_tokens = [token for token, exch_seg in subscribed if is_market_open(exch_seg)]
+
             last_tick_key = f'ps:last_tick:{account_id}'
             last_ticks = r.hgetall(last_tick_key)
             now = time.time()
             quiet_tokens = []
-            for token in subscribed_tokens:
+            for token in live_tokens:
                 last_ts = last_ticks.get(token)
                 if last_ts is None:
                     continue  # never ticked yet since (re)subscribe — not silence, just startup
