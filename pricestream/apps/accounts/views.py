@@ -5,7 +5,7 @@ from django.views.decorators.http import require_POST
 
 from apps.accounts.forms import BrokerAccountForm
 from apps.accounts.models import BrokerAccount
-from apps.accounts.services import test_login
+from apps.accounts.tasks import test_login_task
 
 
 @login_required
@@ -56,10 +56,14 @@ def account_delete(request, account_id):
 @login_required
 @require_POST
 def account_test_login(request, account_id):
+    """Dispatched as a Celery task, never run inline — the Selenium OAuth flow can
+    take up to ~120s, and running that inside a gunicorn worker request occupies it
+    for the whole duration, which with only a handful of workers can make the entire
+    app appear to hang for every other user in the meantime. The result lands on
+    BrokerAccount.last_login_status/last_login_error/last_login_at, visible on the
+    next page load of the accounts list — no need to block this request on it.
+    """
     account = get_object_or_404(BrokerAccount, id=account_id, owner=request.user)
-    ok, error = test_login(account, force=request.POST.get('force') == '1')
-    if ok:
-        messages.success(request, f'{account.nickname}: login OK.')
-    else:
-        messages.error(request, f'{account.nickname}: login failed — {error}')
+    test_login_task.delay(account.id, force=request.POST.get('force') == '1')
+    messages.info(request, f'{account.nickname}: login check started, refresh in a moment to see the result.')
     return redirect('account_list')
