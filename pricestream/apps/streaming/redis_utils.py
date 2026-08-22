@@ -25,3 +25,12 @@ def ws_lock_key(account_id):
 
 def tick_stream_key(account_id):
     return f'{settings.TICK_STREAM_KEY_PREFIX}:{account_id}'
+
+
+def last_tick_key(account_id):
+    """HSET token -> unix ts, maintained by ingest_account_ticks on every tick and
+    read by both ws_health_check and the dashboard — an O(1) Redis hash lookup, not
+    a query against the tick hypertable, so surfacing "last updated" per token on
+    the dashboard never costs a Tick table scan.
+    """
+    return f'ps:last_tick:{account_id}'

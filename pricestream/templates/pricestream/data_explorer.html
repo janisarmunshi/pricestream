@@ -3,19 +3,20 @@
 {% block content %}
 <h1>Data Explorer</h1>
 <div class="card">
-    <form method="get">
+    <form id="explorer-form">
         <label>Account:
-            <select name="account_id">
+            <select name="account_id" id="account_id">
                 <option value="">—</option>
                 {% for account in accounts %}
                 <option value="{{ account.id }}">{{ account.nickname }}</option>
                 {% endfor %}
             </select>
         </label>
-        <input type="text" name="token" placeholder="Token (optional)">
-        <input type="datetime-local" name="start">
-        <input type="datetime-local" name="end">
+        <input type="text" name="token" id="token" placeholder="Token (optional)">
+        <input type="date" name="start" id="start" value="{{ today }}">
+        <input type="date" name="end" id="end" value="{{ today }}">
         <button class="btn btn-primary" type="submit">Query</button>
+        <a class="btn" id="export-link" href="#" target="_blank" rel="noopener">Export CSV</a>
     </form>
 </div>
 
@@ -23,20 +24,78 @@
     <thead>
         <tr><th>Time</th><th>Account</th><th>Exchange</th><th>Token</th><th>Symbol</th><th>LTP</th><th>Volume</th></tr>
     </thead>
-    <tbody>
-        {% for tick in ticks %}
-        <tr>
-            <td>{{ tick.time }}</td>
-            <td>{{ tick.account_id }}</td>
-            <td>{{ tick.exch_seg }}</td>
-            <td>{{ tick.token }}</td>
-            <td>{{ tick.symbol }}</td>
-            <td>{{ tick.ltp }}</td>
-            <td>{{ tick.volume }}</td>
-        </tr>
-        {% empty %}
+    <tbody id="results-body">
         <tr><td colspan="7">Select an account and query to see ticks.</td></tr>
-        {% endfor %}
     </tbody>
 </table>
+
+<script>
+(function () {
+    const form = document.getElementById('explorer-form');
+    const resultsBody = document.getElementById('results-body');
+    const exportLink = document.getElementById('export-link');
+
+    function buildParams() {
+        const params = new URLSearchParams();
+        const accountId = document.getElementById('account_id').value;
+        const token = document.getElementById('token').value;
+        const start = document.getElementById('start').value;
+        const end = document.getElementById('end').value;
+        if (accountId) params.set('account_id', accountId);
+        if (token) params.set('token', token);
+        if (start) params.set('start', start + 'T00:00:00Z');
+        if (end) params.set('end', end + 'T23:59:59Z');
+        return params;
+    }
+
+    function escapeHtml(s) {
+        const div = document.createElement('div');
+        div.textContent = s == null ? '' : s;
+        return div.innerHTML;
+    }
+
+    async function runQuery(e) {
+        if (e) e.preventDefault();
+        const params = buildParams();
+        exportLink.href = '{% url "data_explorer_export" %}?' + params.toString();
+
+        if (!params.get('account_id')) {
+            resultsBody.innerHTML = '<tr><td colspan="7">Select an account and query to see ticks.</td></tr>';
+            return;
+        }
+
+        const resp = await fetch('{% url "data_explorer_query" %}?' + params.toString());
+        const data = await resp.json();
+        if (!data.results.length) {
+            resultsBody.innerHTML = '<tr><td colspan="7">No ticks found for this filter.</td></tr>';
+            return;
+        }
+        resultsBody.innerHTML = data.results.map(function (t) {
+            return '<tr>' +
+                '<td>' + escapeHtml(t.time) + '</td>' +
+                '<td>' + escapeHtml(t.account_id) + '</td>' +
+                '<td>' + escapeHtml(t.exch_seg) + '</td>' +
+                '<td>' + escapeHtml(t.token) + '</td>' +
+                '<td>' + escapeHtml(t.symbol) + '</td>' +
+                '<td>' + escapeHtml(t.ltp) + '</td>' +
+                '<td>' + escapeHtml(t.volume) + '</td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    form.addEventListener('submit', runQuery);
+    exportLink.addEventListener('click', function (e) {
+        if (!buildParams().get('account_id')) {
+            e.preventDefault();
+            alert('Select an account first.');
+        }
+    });
+    // Keep the export link's query string in sync as the user edits filters,
+    // without waiting for a Query click.
+    form.addEventListener('input', function () {
+        exportLink.href = '{% url "data_explorer_export" %}?' + buildParams().toString();
+    });
+    exportLink.href = '{% url "data_explorer_export" %}?' + buildParams().toString();
+})();
+</script>
 {% endblock %}

@@ -1,9 +1,15 @@
+import csv
+from datetime import datetime, timezone as dt_timezone
+
 from django.contrib.auth.decorators import login_required
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.utils.dateparse import parse_datetime
+from django.views.decorators.http import require_GET, require_POST
 
 from apps.accounts.models import BrokerAccount
 from apps.streaming.models import StreamingConfig, StreamingSetting, Subscription
+from apps.streaming.redis_utils import get_redis, last_tick_key
 from apps.streaming.tasks import ingest_account_ticks
 from apps.ticks.models import StreamMetrics, SystemEvent
 from apps.ticks.queries import query_ticks
@@ -11,15 +17,33 @@ from apps.ticks.queries import query_ticks
 
 @login_required
 def dashboard(request):
-    """Live connection status, tick rate, lag, storage usage — backed by the latest
-    StreamMetrics snapshot per account.
+    """Live connection status, tick rate, lag, storage usage, and the enabled token
+    list with last-updated time per account. The per-token timestamps come from the
+    Redis hash ingest_account_ticks already maintains for the WS health check
+    (ps:last_tick:{account_id}) — an O(1) hash read per account, not a query against
+    the tick hypertable, so this adds no load proportional to how much history has
+    been captured.
     """
     accounts = BrokerAccount.objects.filter(owner=request.user)
+    r = get_redis()
     rows = []
     for account in accounts:
         setting = getattr(account, 'streaming_setting', None)
         metrics = StreamMetrics.objects.filter(account_id=account.id).order_by('-created_at').first()
-        rows.append({'account': account, 'setting': setting, 'metrics': metrics})
+
+        subs = (
+            Subscription.objects.filter(account_id=account.id, is_enabled=True)
+            .select_related('script')
+            .order_by('script__exch_seg', 'script__symbol')
+        )
+        last_ticks = r.hgetall(last_tick_key(account.id))
+        tokens = []
+        for sub in subs:
+            ts = last_ticks.get(sub.script.token)
+            last_updated = datetime.fromtimestamp(float(ts), tz=dt_timezone.utc) if ts else None
+            tokens.append({'script': sub.script, 'last_updated': last_updated})
+
+        rows.append({'account': account, 'setting': setting, 'metrics': metrics, 'tokens': tokens})
     return render(request, 'pricestream/dashboard.html', {'rows': rows})
 
 
@@ -54,27 +78,81 @@ def streaming_action(request, account_id):
     return redirect('streaming_control')
 
 
-@login_required
-def data_explorer(request):
-    """Query historical ticks, export CSV, basic charting. Reuses the same internal
-    ticks-query layer the external API's GET /api/v1/ticks/ calls.
+def _data_explorer_queryset(request):
+    """Shared by the AJAX query endpoint and the CSV export so there is one
+    filter-parsing implementation, not two that could quietly drift apart.
+    Only returns ticks for accounts the requesting user actually owns.
     """
-    accounts = BrokerAccount.objects.filter(owner=request.user)
-    account_id = request.GET.get('account_id')
+    owned_account_ids = set(
+        BrokerAccount.objects.filter(owner=request.user).values_list('id', flat=True)
+    )
     token = request.GET.get('token')
     start = request.GET.get('start')
     end = request.GET.get('end')
 
-    ticks = []
-    if account_id:
-        ticks = query_ticks(
-            account_ids=[int(account_id)],
-            tokens=[token] if token else None,
-            start=start or None,
-            end=end or None,
-        )[:1000]
+    try:
+        account_id = int(request.GET.get('account_id', ''))
+    except ValueError:
+        account_id = None
 
-    return render(request, 'pricestream/data_explorer.html', {'accounts': accounts, 'ticks': ticks})
+    if account_id is None or account_id not in owned_account_ids:
+        return query_ticks(account_ids=[])  # empty result, not another user's data
+
+    return query_ticks(
+        account_ids=[account_id],
+        tokens=[token] if token else None,
+        start=parse_datetime(start) if start else None,
+        end=parse_datetime(end) if end else None,
+    )
+
+
+@login_required
+def data_explorer(request):
+    """Query historical ticks, export CSV, basic charting. The results table is
+    populated via AJAX (data_explorer_query) so pressing Query never reloads the
+    page or clears the date inputs — a plain <form method="get"> would force a full
+    navigation. The date inputs default to today's date on first load.
+    """
+    accounts = BrokerAccount.objects.filter(owner=request.user)
+    today = datetime.now(dt_timezone.utc).date().isoformat()
+    return render(request, 'pricestream/data_explorer.html', {'accounts': accounts, 'today': today})
+
+
+@login_required
+@require_GET
+def data_explorer_query(request):
+    """AJAX JSON endpoint backing the Data Explorer results table — same filters as
+    the CSV export and the external API's GET /api/v1/ticks/, one query
+    implementation shared by all three.
+    """
+    ticks = _data_explorer_queryset(request)[:1000]
+    return JsonResponse({'results': [
+        {
+            'time': t.time.isoformat(),
+            'account_id': t.account_id,
+            'exch_seg': t.exch_seg,
+            'token': t.token,
+            'symbol': t.symbol,
+            'ltp': str(t.ltp),
+            'volume': t.volume,
+        }
+        for t in ticks
+    ]})
+
+
+@login_required
+@require_GET
+def data_explorer_export(request):
+    """CSV export — streams straight to a file download, never rendered on screen."""
+    ticks = _data_explorer_queryset(request)[:100_000]
+
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="ticks_export.csv"'
+    writer = csv.writer(response)
+    writer.writerow(['time', 'account_id', 'exch_seg', 'token', 'symbol', 'ltp', 'volume'])
+    for t in ticks:
+        writer.writerow([t.time.isoformat(), t.account_id, t.exch_seg, t.token, t.symbol, t.ltp, t.volume])
+    return response
 
 
 @login_required

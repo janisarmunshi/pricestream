@@ -32,6 +32,17 @@
     </form>
 </div>
 
+{% if enabled_by_exchange %}
+<div class="card">
+    <h3>Currently enabled, by exchange</h3>
+    {% for exch, scripts_for_exch in enabled_by_exchange %}
+    <p><strong>{{ exch }}</strong> ({{ scripts_for_exch|length }}):
+        {% for s in scripts_for_exch %}{{ s.symbol }}{% if not forloop.last %}, {% endif %}{% endfor %}
+    </p>
+    {% endfor %}
+</div>
+{% endif %}
+
 {% if exch_seg %}
 <div class="card">
     <h3>Bulk CSV import for {{ exch_seg }} (columns: token or symbol)</h3>

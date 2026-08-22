@@ -36,11 +36,19 @@ def instrument_manager(request):
         scripts = scripts.order_by('symbol')[:200]
 
     subscribed_tokens = set()
+    enabled_by_exchange = []
     if account_id:
-        subscribed_tokens = set(
+        enabled_subs = (
             Subscription.objects.filter(account_id=account_id, is_enabled=True)
-            .values_list('script__token', flat=True)
+            .select_related('script')
+            .order_by('script__exch_seg', 'script__symbol')
         )
+        subscribed_tokens = {sub.script.token for sub in enabled_subs}
+
+        grouped = {}
+        for sub in enabled_subs:
+            grouped.setdefault(sub.script.exch_seg, []).append(sub.script)
+        enabled_by_exchange = sorted(grouped.items())
 
     return render(request, 'pricestream/instrument_manager.html', {
         'accounts': accounts,
@@ -50,6 +58,7 @@ def instrument_manager(request):
         'scripts': scripts,
         'search': search,
         'subscribed_tokens': subscribed_tokens,
+        'enabled_by_exchange': enabled_by_exchange,
     })
 
 

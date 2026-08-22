@@ -170,6 +170,10 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PAGINATION_CLASS': 'apps.api.pagination.TickCursorPagination',
     'PAGE_SIZE': 500,
+    'DEFAULT_RENDERER_CLASSES': (
+        'rest_framework.renderers.JSONRenderer',
+        'apps.api.renderers.TOONRenderer',
+    ),
     'DEFAULT_THROTTLE_CLASSES': (
         'apps.api.throttling.ApiKeyRateThrottle',
     ),

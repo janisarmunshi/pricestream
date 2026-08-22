@@ -26,4 +26,25 @@
         {% endfor %}
     </tbody>
 </table>
+
+{% for row in rows %}
+{% if row.tokens %}
+<h3 style="margin-top:1.5rem;">{{ row.account.nickname }} — enabled tokens</h3>
+<table>
+    <thead>
+        <tr><th>Symbol</th><th>Exchange</th><th>Token</th><th>Last updated</th></tr>
+    </thead>
+    <tbody>
+        {% for t in row.tokens %}
+        <tr>
+            <td>{{ t.script.symbol }}</td>
+            <td>{{ t.script.exch_seg }}</td>
+            <td>{{ t.script.token }}</td>
+            <td>{{ t.last_updated|default:"—" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endfor %}
 {% endblock %}

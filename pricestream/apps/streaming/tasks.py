@@ -30,7 +30,7 @@ from apps.accounts.broker.exchange_sessions import is_any_market_day_active, is_
 from apps.accounts.broker.finvasia import FinvasiaConnector
 from apps.accounts.models import BrokerAccount
 from apps.streaming.models import StreamingSetting, Subscription
-from apps.streaming.redis_utils import get_redis, get_redis_streams, tick_stream_key, ws_lock_key
+from apps.streaming.redis_utils import get_redis, get_redis_streams, last_tick_key as _last_tick_key, tick_stream_key, ws_lock_key
 from apps.ticks.models import SystemEvent
 
 logger = logging.getLogger(__name__)
@@ -148,9 +148,7 @@ def ingest_account_ticks(self, account_id):
     redis_streams = get_redis_streams()
     buffer = _TickBuffer(redis_streams, tick_stream_key(account_id))
     r = get_redis()
-    last_tick_key = f'ps:last_tick:{account_id}'  # HSET token -> unix ts, read by ws_health_check
-    # for per-instrument silence detection (a socket that looks "connected" but has
-    # silently stopped receiving a subset of this account's subscribed tokens).
+    last_tick_key = _last_tick_key(account_id)
 
     # The broker's own tick payload only carries token ('tk') and exchange ('e'), not
     # symbol — this map is rebuilt on every (re)subscribe so on_tick can still attach
@@ -327,8 +325,7 @@ def ws_health_check(self):
             )
             live_tokens = [token for token, exch_seg in subscribed if is_market_open(exch_seg)]
 
-            last_tick_key = f'ps:last_tick:{account_id}'
-            last_ticks = r.hgetall(last_tick_key)
+            last_ticks = r.hgetall(_last_tick_key(account_id))
             now = time.time()
             quiet_tokens = []
             for token in live_tokens:

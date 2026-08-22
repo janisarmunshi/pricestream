@@ -7,6 +7,8 @@ urlpatterns = [
     path('streaming/', views.streaming_control, name='streaming_control'),
     path('streaming/<int:account_id>/action/', views.streaming_action, name='streaming_action'),
     path('explorer/', views.data_explorer, name='data_explorer'),
+    path('explorer/query/', views.data_explorer_query, name='data_explorer_query'),
+    path('explorer/export/', views.data_explorer_export, name='data_explorer_export'),
     path('settings/', views.settings_view, name='settings'),
     path('logs/', views.logs_and_alerts, name='logs_and_alerts'),
 
