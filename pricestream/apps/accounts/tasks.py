@@ -38,3 +38,27 @@ def test_login_task(self, account_id, force=False):
         return test_login(account, force=force)
     finally:
         get_redis().delete(lock_key)
+
+
+@shared_task(bind=True)
+def preauthenticate_all_accounts(self):
+    """Beat task at ~08:00 IST, well before NSE's 09:15 open — mirrors Yantra's
+    workerPreAuthenticateBrokers exactly: pre-authenticate every account with at
+    least one enabled Subscription via Selenium+TOTP NOW, while there's no time
+    pressure, so a fresh access_token is already sitting in the DB by market open.
+    market_hours_supervisor then only ever needs a fast token *validation* at the
+    actual open, never a ~30s-3min Selenium round-trip blocking the time-critical
+    start of the trading session — which is what caused ingestion to sit unauthenticated
+    for hours when it was only ever attempted reactively at auto-start time.
+
+    Staggered 5s apart per account (same interval as Yantra) so many concurrent
+    headless Chrome sessions don't all launch in the same instant on one VPS.
+    """
+    account_ids = (
+        BrokerAccount.objects.filter(
+            is_active=True, subscriptions__is_enabled=True,
+        ).distinct().values_list('id', flat=True)
+    )
+    for i, account_id in enumerate(account_ids):
+        test_login_task.apply_async((account_id,), countdown=i * 5)
+    return f'pre-auth dispatched for {len(account_ids)} account(s)'

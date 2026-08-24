@@ -16,7 +16,13 @@ Celery tasks for the streaming app:
 - market_hours_supervisor: beat task every 1-2 min. Auto-starts/stops each account's
   ingest_account_ticks task based on whether any of its subscribed exchanges are
   still within their trading session for the day — genuinely autonomous, unlike
-  Yantra's manually-triggered equivalent.
+  Yantra's manually-triggered equivalent. Expects the access_token to already be
+  fresh (see apps.accounts.tasks.preauthenticate_all_accounts, a beat task at 08:00
+  IST that mirrors Yantra's own workerPreAuthenticateBrokers precedent — Selenium
+  re-auth happens well before market open, with no time pressure, never reactively
+  at auto-start time). The token-missing branch here is a fallback safety net for
+  the unexpected case (pre-auth itself failed, or an account was added after 08:00),
+  not the primary recovery path.
 """
 import json
 import logging

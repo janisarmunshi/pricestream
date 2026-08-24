@@ -26,6 +26,13 @@ app.conf.beat_schedule = {
         'task': 'apps.instruments.tasks.sync_script_master',
         'schedule': crontab(hour=6, minute=0),
     },
+    'daily-broker-preauth': {
+        # Well before NSE's 09:15 open — mirrors Yantra's own
+        # workerPreAuthenticateBrokers precedent (pre-auth at 8:30 AM there).
+        # CELERY_TIMEZONE is Asia/Kolkata, so this is 08:00 IST.
+        'task': 'apps.accounts.tasks.preauthenticate_all_accounts',
+        'schedule': crontab(hour=8, minute=0),
+    },
     'hourly-expired-script-cleanup': {
         'task': 'apps.instruments.tasks.sync_expired_scripts',
         'schedule': crontab(minute=0),
