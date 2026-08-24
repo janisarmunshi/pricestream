@@ -29,7 +29,7 @@ from django.utils import timezone
 from apps.accounts.broker.exchange_sessions import is_any_market_day_active, is_market_open
 from apps.accounts.broker.finvasia import FinvasiaConnector
 from apps.accounts.models import BrokerAccount
-from apps.accounts.tasks import test_login_task
+from apps.accounts.tasks import reauth_dispatch_lock_key, test_login_task
 from apps.streaming.models import StreamingSetting, Subscription
 from apps.streaming.redis_utils import get_redis, get_redis_streams, last_tick_key as _last_tick_key, tick_stream_key, ws_lock_key
 from apps.ticks.models import SystemEvent
@@ -405,10 +405,13 @@ def market_hours_supervisor(self):
             # rejection, or was never set) — dispatch the actual Selenium re-auth
             # rather than starting ingest_account_ticks again, which would just hit
             # the same missing token and immediately exit. Locked per-account so
-            # this doesn't pile up duplicate ~120s Selenium logins on every beat tick
-            # while one is already running.
-            reauth_lock_key = f'ps:reauth_dispatch:{account_id}'
-            if r.set(reauth_lock_key, '1', nx=True, ex=180):
+            # this doesn't pile up duplicate Selenium logins on every beat tick while
+            # one is already running — test_login_task itself deletes this lock on
+            # completion (real run time varies widely, ~30s to 3+ minutes with
+            # TOTP-rotation retries, so a short fixed TTL here previously expired
+            # mid-run and let a second beat tick dispatch a concurrent duplicate
+            # login). ex=600 is only a crash safety net, not the expected lifetime.
+            if r.set(reauth_dispatch_lock_key(account_id), '1', nx=True, ex=600):
                 test_login_task.delay(account_id)
                 logger.info(f'[MARKET-HOURS] account={account_id} has no access token — dispatched re-auth')
             continue
