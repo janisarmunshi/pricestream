@@ -140,10 +140,18 @@ def ingest_account_ticks(self, account_id):
     connector = FinvasiaConnector(account)
     conn = connector.get_connection_object(session_only=True)
     if conn is None:
-        logger.error(f'[WS-ING] account={account_id} broker connection failed')
+        reason = 'broker connection failed (no valid session token)'
+        logger.error(f'[WS-ING] account={account_id} {reason}')
+        # Clear the dead token so the NEXT market_hours_supervisor beat tick
+        # dispatches an actual Selenium re-auth instead of repeating this same
+        # failed validation every auto-start attempt indefinitely.
+        if account.access_token:
+            account.access_token = ''
+            account.save(update_fields=['access_token'])
         setting.actual_state = StreamingSetting.STATE_STOPPED
-        setting.last_error = 'broker connection failed (no valid session token)'
+        setting.last_error = reason
         setting.save(update_fields=['actual_state', 'last_error'])
+        SystemEvent.log(account_id, SystemEvent.TYPE_ERROR, reason)
         return False
 
     redis_streams = get_redis_streams()
