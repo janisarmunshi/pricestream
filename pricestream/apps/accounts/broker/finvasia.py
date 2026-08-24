@@ -17,7 +17,7 @@ import platform
 import shutil
 import tempfile
 import time
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import pyotp
 import redis
@@ -68,6 +68,31 @@ def _redis_client():
         host=settings.REDIS_HOST, port=settings.REDIS_PORT,
         password=settings.REDIS_PASSWORD or None, decode_responses=True,
     )
+
+
+def _extract_auth_code(current_url: str):
+    """Pull the OAuth `code` out of the browser's current URL after a successful
+    Finvasia login.
+
+    This Finvasia OAuth app's redirect_uri points at PriceStream's own site
+    (marketmantra.tech/pricestream/), so the browser lands there with ?code=...
+    attached — but PriceStream requires login, so Django's LoginRequiredMixin
+    redirects that straight to /login/?next=<urlencoded original path+query>,
+    burying the code one level deeper inside `next=` rather than as a bare
+    top-level query param. Confirmed live: every login attempt was actually
+    succeeding at the broker, but _get_auth_code kept polling forever because it
+    only ever checked for a bare `code=`, which never existed on the final URL —
+    the retry loop then unconditionally retried, disguising a URL-parsing bug as
+    a login failure.
+    """
+    qs = parse_qs(urlparse(current_url).query)
+    if 'code' in qs:
+        return qs['code'][0]
+    if 'next' in qs:
+        inner_qs = parse_qs(urlparse(unquote(qs['next'][0])).query)
+        if 'code' in inner_qs:
+            return inner_qs['code'][0]
+    return None
 
 
 class FinvasiaConnector:
@@ -154,13 +179,10 @@ class FinvasiaConnector:
             max_retries = 3
             retries = 0
             while True:
-                try:
-                    auth_code = parse_qs(urlparse(driver.current_url).query)['code'][0]
-                    if auth_code:
-                        logger.debug(f'OAuth auth code captured for account {self.Account.id}.')
-                        return auth_code
-                except (KeyError, IndexError):
-                    pass
+                auth_code = _extract_auth_code(driver.current_url)
+                if auth_code:
+                    logger.debug(f'OAuth auth code captured for account {self.Account.id}.')
+                    return auth_code
 
                 elapsed = time.time() - start
                 if elapsed > 120:
