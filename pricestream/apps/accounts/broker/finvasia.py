@@ -197,6 +197,13 @@ class FinvasiaConnector:
         """Return a connected NorenApiPy for this account, logging in via Selenium+TOTP
         if no valid stored access token exists. Redis-locked per account so two workers
         never run Selenium for the same account at once.
+
+        session_only=True skips the Selenium re-auth fallback (raises instead of
+        blocking a background task on a ~120s login) but still validates the stored
+        token with one cheap get_quotes round-trip — skipping that check entirely
+        previously let an expired token straight through into a WebSocket connection,
+        where the broker's auth rejection triggered an unbounded reconnect loop (see
+        _MAX_CONSECUTIVE_AUTH_FAILURES) instead of failing fast here with a clear error.
         """
         error = None
         try:
@@ -211,9 +218,6 @@ class FinvasiaConnector:
                     )
                     return None
                 api.injectOAuthHeader(self.Account.access_token, self.Account.client_id, self.Account.client_id)
-                if session_only:
-                    self.ConnectionObject = api
-                    return api
                 if self._validate_token(api, label=' [stored-token]'):
                     self.ConnectionObject = api
                     return api
@@ -288,6 +292,14 @@ class FinvasiaConnector:
 
     # ------------------------------------------------------------- WebSocket
 
+    # Consecutive auth-rejected reconnects (broker sends {'t':'ak','s':'NOT_OK'}) to
+    # tolerate before giving up entirely. The vendored NorenApi retries
+    # run_forever() internally with only a fixed ~0.1s sleep and NO backoff, so an
+    # expired/invalid token previously spun in a tight reconnect loop hammering the
+    # broker's server hundreds of times per second — this caps that instead of
+    # leaving it to run unbounded.
+    _MAX_CONSECUTIVE_AUTH_FAILURES = 5
+
     def _open_websocket_session(self, subscriptions, tick_callback):
         """Open the broker WebSocket and wire up its callbacks.
 
@@ -298,10 +310,13 @@ class FinvasiaConnector:
         """
         self._lastLstTicks = subscriptions
         self._tick_callback = tick_callback
+        self._consecutive_auth_failures = 0
+        self._auth_failed_permanently = False
 
         def event_handler_tick_update(message):
             self._wsConnected = True
             self._lastWsActivityAt = time.time()
+            self._consecutive_auth_failures = 0
             if float(message.get('lp', 0)) > 0:
                 self._tick_callback(message)
 
@@ -324,6 +339,22 @@ class FinvasiaConnector:
         def error_callback(error):
             self._wsConnected = False
             logger.warning(f'[WS-ERROR] websocket error for account={self.Account.id}: {error}')
+
+            is_auth_rejection = isinstance(error, dict) and error.get('t') == 'ak' and error.get('s') == 'NOT_OK'
+            if is_auth_rejection:
+                self._consecutive_auth_failures += 1
+                if self._consecutive_auth_failures >= self._MAX_CONSECUTIVE_AUTH_FAILURES:
+                    self._auth_failed_permanently = True
+                    logger.error(
+                        f'[WS-AUTH-FAIL] account={self.Account.id} rejected auth '
+                        f'{self._consecutive_auth_failures} times in a row (likely an expired/'
+                        f'invalid access token) — forcing the socket closed instead of retrying '
+                        f'unbounded against the broker'
+                    )
+                    try:
+                        self.ConnectionObject.close_websocket()
+                    except Exception:
+                        pass
 
         self.ws = self.ConnectionObject.start_websocket(
             subscribe_callback=event_handler_tick_update,
@@ -374,6 +405,14 @@ class FinvasiaConnector:
 
     def isWsConnected(self) -> bool:
         return self._wsConnected
+
+    def authFailedPermanently(self) -> bool:
+        """True once the broker has rejected auth _MAX_CONSECUTIVE_AUTH_FAILURES
+        times in a row — the caller (ingest_account_ticks) should stop looping and
+        exit rather than let resubscribe_websocket keep retrying against a token
+        that isn't going to start working on its own.
+        """
+        return getattr(self, '_auth_failed_permanently', False)
 
     def close_websocket(self):
         try:
