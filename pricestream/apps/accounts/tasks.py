@@ -53,6 +53,12 @@ def preauthenticate_all_accounts(self):
 
     Staggered 5s apart per account (same interval as Yantra) so many concurrent
     headless Chrome sessions don't all launch in the same instant on one VPS.
+
+    Always force=True: this is a scheduled daily re-auth, not a "reuse it if it's
+    still valid" check — a leftover token from a prior day (or a prior manual
+    login) validating successfully here would skip the whole point of doing this
+    ahead of market open, since a token that validates now could still expire
+    partway through the trading session. Always get a genuinely fresh one.
     """
     account_ids = (
         BrokerAccount.objects.filter(
@@ -60,5 +66,5 @@ def preauthenticate_all_accounts(self):
         ).distinct().values_list('id', flat=True)
     )
     for i, account_id in enumerate(account_ids):
-        test_login_task.apply_async((account_id,), countdown=i * 5)
+        test_login_task.apply_async((account_id,), kwargs={'force': True}, countdown=i * 5)
     return f'pre-auth dispatched for {len(account_ids)} account(s)'
