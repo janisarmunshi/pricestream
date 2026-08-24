@@ -144,6 +144,15 @@ class FinvasiaConnector:
             logger.debug(f'OAuth credentials submitted for account {self.Account.id}, waiting for auth code...')
 
             start = time.time()
+            # Hard cap on TOTP-rotation retries — without this, a login that never
+            # progresses (wrong field, page stuck, broker rejecting every attempt)
+            # retried every ~120s forever: confirmed live, one login attempt ran for
+            # over 10 minutes across 5+ retries before a caller finally gave up
+            # waiting on the task and dispatched a duplicate. Selenium/Chrome is not
+            # cheap to hold open indefinitely, and each retry that never succeeds is
+            # simply not going to start succeeding on retry #20 either.
+            max_retries = 3
+            retries = 0
             while True:
                 try:
                     auth_code = parse_qs(urlparse(driver.current_url).query)['code'][0]
@@ -155,6 +164,13 @@ class FinvasiaConnector:
 
                 elapsed = time.time() - start
                 if elapsed > 120:
+                    if retries >= max_retries:
+                        logger.error(
+                            f'OAuth auth code capture gave up for account {self.Account.id} after '
+                            f'{retries} TOTP-rotation retries — current url={driver.current_url}'
+                        )
+                        break
+
                     new_otp = pyotp.TOTP(self.Account.totp_secret).now()
                     if new_otp != otp_value:
                         try:
@@ -173,8 +189,9 @@ class FinvasiaConnector:
                         except Exception as retry_exc:
                             logger.warning(
                                 f'OAuth TOTP-rotation retry failed for account {self.Account.id}: {retry_exc!r} '
-                                f'— will keep polling for the auth code instead of aborting.'
+                                f'— retry {retries + 1}/{max_retries}.'
                             )
+                        retries += 1
                         start = time.time()
                         continue
                     logger.error(f'OAuth auth code capture timed out for account {self.Account.id}.')
