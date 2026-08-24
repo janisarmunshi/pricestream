@@ -113,12 +113,6 @@ class FinvasiaConnector:
             wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='password']")))
             time.sleep(1)
 
-            all_inputs = driver.find_elements(
-                By.CSS_SELECTOR,
-                "input:not([type='hidden']):not([type='checkbox']):not([type='radio'])",
-            )
-            visible_inputs = [inp for inp in all_inputs if inp.is_displayed()]
-
             def fast_fill(element, value):
                 element.click()
                 time.sleep(0.1)
@@ -126,11 +120,23 @@ class FinvasiaConnector:
                 element.send_keys(value)
                 time.sleep(0.1)
 
-            fast_fill(visible_inputs[0], self.Account.client_id)
-            fast_fill(visible_inputs[1], self.Account.password)
+            def find_login_field(field_id):
+                # Select by the login form's own stable element ids rather than
+                # positional indexing over every visible input on the page —
+                # Shoonya's OAuth login page is served as part of a much larger app
+                # bundle (symbol search, IP-address settings, calendar widgets,
+                # etc. are all present in the DOM alongside the login form), so
+                # "the first three visible inputs" doesn't reliably mean USER ID/
+                # PASSWORD/OTP — confirmed live: those turned out to be an unrelated
+                # numeric field and two search boxes, so the real form was never
+                # actually filled in and the page never redirected.
+                return wait.until(EC.element_to_be_clickable((By.ID, field_id)))
+
+            fast_fill(find_login_field('lgnusrid'), self.Account.client_id)
+            fast_fill(find_login_field('lgnpwd'), self.Account.password)
 
             otp_value = pyotp.TOTP(self.Account.totp_secret).now()
-            fast_fill(visible_inputs[2], otp_value)
+            fast_fill(find_login_field('lgnotp'), otp_value)
 
             wait.until(
                 EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='LOGIN']"))
@@ -152,31 +158,18 @@ class FinvasiaConnector:
                     new_otp = pyotp.TOTP(self.Account.totp_secret).now()
                     if new_otp != otp_value:
                         try:
-                            # Re-locate the OTP field fresh rather than reusing
-                            # visible_inputs[2] from the original page load — if the
-                            # page has navigated/re-rendered at all since then (the
-                            # broker's own post-login redirect chain, an error
-                            # banner, anything), that old element reference is
-                            # stale and raises StaleElementReferenceException,
-                            # which previously wasn't caught here and aborted the
-                            # whole login attempt instead of just this retry.
-                            all_inputs = driver.find_elements(
-                                By.CSS_SELECTOR,
-                                "input:not([type='hidden']):not([type='checkbox']):not([type='radio'])",
-                            )
-                            visible = [inp for inp in all_inputs if inp.is_displayed()]
-                            if len(visible) >= 3:
-                                fast_fill(visible[2], new_otp)
-                                wait.until(
-                                    EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='LOGIN']"))
-                                ).click()
-                                otp_value = new_otp
-                            else:
-                                logger.warning(
-                                    f'OAuth retry for account {self.Account.id}: expected OTP field not '
-                                    f'found on current page (url={driver.current_url}) — page may have '
-                                    f'already moved past the login form.'
-                                )
+                            # Re-locate the OTP field fresh by its stable id rather
+                            # than reusing a cached element reference — if the page
+                            # has navigated/re-rendered at all since the original
+                            # page load, that old reference goes stale and raises
+                            # StaleElementReferenceException, which previously
+                            # wasn't caught here and aborted the whole login
+                            # attempt instead of just this retry.
+                            fast_fill(find_login_field('lgnotp'), new_otp)
+                            wait.until(
+                                EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='LOGIN']"))
+                            ).click()
+                            otp_value = new_otp
                         except Exception as retry_exc:
                             logger.warning(
                                 f'OAuth TOTP-rotation retry failed for account {self.Account.id}: {retry_exc!r} '
