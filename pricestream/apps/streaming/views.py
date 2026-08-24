@@ -4,6 +4,7 @@ from datetime import datetime, timezone as dt_timezone
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_GET, require_POST
 
@@ -114,7 +115,10 @@ def data_explorer(request):
     navigation. The date inputs default to today's date on first load.
     """
     accounts = BrokerAccount.objects.filter(owner=request.user)
-    today = datetime.now(dt_timezone.utc).date().isoformat()
+    # localtime(), not utcnow() — TIME_ZONE is Asia/Kolkata, so this is "today" in
+    # IST, matching what the data itself will be shown in (see data_explorer_query/
+    # data_explorer_export below) rather than flipping a date early per UTC.
+    today = timezone.localtime(timezone.now()).date().isoformat()
     return render(request, 'pricestream/data_explorer.html', {'accounts': accounts, 'today': today})
 
 
@@ -128,7 +132,11 @@ def data_explorer_query(request):
     ticks = _data_explorer_queryset(request)[:1000]
     return JsonResponse({'results': [
         {
-            'time': t.time.isoformat(),
+            # t.time is stored/queried in UTC (Django's USE_TZ convention) — convert
+            # to IST (settings.TIME_ZONE) before rendering, same as DRF's
+            # DateTimeField already does automatically for the external API. Left as
+            # plain .isoformat() before, this showed raw UTC with a +00:00 offset.
+            'time': timezone.localtime(t.time).isoformat(),
             'account_id': t.account_id,
             'exch_seg': t.exch_seg,
             'token': t.token,
@@ -151,7 +159,7 @@ def data_explorer_export(request):
     writer = csv.writer(response)
     writer.writerow(['time', 'account_id', 'exch_seg', 'token', 'symbol', 'ltp', 'volume'])
     for t in ticks:
-        writer.writerow([t.time.isoformat(), t.account_id, t.exch_seg, t.token, t.symbol, t.ltp, t.volume])
+        writer.writerow([timezone.localtime(t.time).isoformat(), t.account_id, t.exch_seg, t.token, t.symbol, t.ltp, t.volume])
     return response
 
 
