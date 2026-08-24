@@ -151,12 +151,38 @@ class FinvasiaConnector:
                 if elapsed > 120:
                     new_otp = pyotp.TOTP(self.Account.totp_secret).now()
                     if new_otp != otp_value:
-                        fast_fill(visible_inputs[2], new_otp)
-                        wait.until(
-                            EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='LOGIN']"))
-                        ).click()
+                        try:
+                            # Re-locate the OTP field fresh rather than reusing
+                            # visible_inputs[2] from the original page load — if the
+                            # page has navigated/re-rendered at all since then (the
+                            # broker's own post-login redirect chain, an error
+                            # banner, anything), that old element reference is
+                            # stale and raises StaleElementReferenceException,
+                            # which previously wasn't caught here and aborted the
+                            # whole login attempt instead of just this retry.
+                            all_inputs = driver.find_elements(
+                                By.CSS_SELECTOR,
+                                "input:not([type='hidden']):not([type='checkbox']):not([type='radio'])",
+                            )
+                            visible = [inp for inp in all_inputs if inp.is_displayed()]
+                            if len(visible) >= 3:
+                                fast_fill(visible[2], new_otp)
+                                wait.until(
+                                    EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='LOGIN']"))
+                                ).click()
+                                otp_value = new_otp
+                            else:
+                                logger.warning(
+                                    f'OAuth retry for account {self.Account.id}: expected OTP field not '
+                                    f'found on current page (url={driver.current_url}) — page may have '
+                                    f'already moved past the login form.'
+                                )
+                        except Exception as retry_exc:
+                            logger.warning(
+                                f'OAuth TOTP-rotation retry failed for account {self.Account.id}: {retry_exc!r} '
+                                f'— will keep polling for the auth code instead of aborting.'
+                            )
                         start = time.time()
-                        otp_value = new_otp
                         continue
                     logger.error(f'OAuth auth code capture timed out for account {self.Account.id}.')
                     break
