@@ -128,8 +128,19 @@ def data_explorer_query(request):
     """AJAX JSON endpoint backing the Data Explorer results table — same filters as
     the CSV export and the external API's GET /api/v1/ticks/, one query
     implementation shared by all three.
+
+    query_ticks() orders ascending (time), which is correct for a full CSV
+    export/report but wrong for this preview: taking the first 1000 rows of a busy
+    trading day returns the EARLIEST ticks, silently truncating the view partway
+    through the afternoon and making it look like logging stopped hours ago when it
+    hadn't — confirmed live (a token still updating at 20:03 IST showed no data past
+    ~19:15 in this view, purely because ~1000 ticks across the day's subscribed
+    instruments had already accumulated by then). Reverse in Python rather than
+    change query_ticks' own ordering, since the CSV export and the external API both
+    depend on it staying chronological.
     """
-    ticks = _data_explorer_queryset(request)[:1000]
+    ticks = list(_data_explorer_queryset(request).order_by('-time')[:1000])
+    ticks.reverse()  # chronological in the table, only the SELECTION was "latest 1000"
     return JsonResponse({'results': [
         {
             # t.time is stored/queried in UTC (Django's USE_TZ convention) — convert
