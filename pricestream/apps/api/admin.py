@@ -7,7 +7,14 @@ from apps.api.models import ApiKey
 class ApiKeyAdmin(admin.ModelAdmin):
     list_display = ('label', 'key_prefix', 'is_active', 'created_at', 'last_used_at', 'revoked_at')
     list_filter = ('is_active',)
-    filter_horizontal = ('scoped_accounts', 'scoped_scripts')
+    filter_horizontal = ('scoped_accounts',)
+    # scoped_scripts previously used filter_horizontal too, which renders EVERY
+    # Script row into the page's HTML/DOM for client-side JS filtering — with
+    # 170k+ synced instruments, that made the Add/Edit ApiKey page (and therefore
+    # saving it, which re-renders the same page) extremely slow to load. Scripts
+    # need Django's own admin registered with search_fields for autocomplete to
+    # work (see apps/instruments/admin.py's ScriptAdmin.search_fields).
+    autocomplete_fields = ('scoped_scripts',)
     readonly_fields = ('key_hash', 'key_prefix', 'created_at', 'last_used_at')
     actions = ['revoke_keys']
 
