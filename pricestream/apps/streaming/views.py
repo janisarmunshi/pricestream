@@ -2,7 +2,6 @@ import csv
 from datetime import datetime, timezone as dt_timezone
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -133,41 +132,43 @@ def data_explorer_query(request):
     the CSV export and the external API's GET /api/v1/ticks/, one query
     implementation shared by all three.
 
-    Real keyset ("seek") pagination on (time, id), not a fixed row cap — a single
-    busy instrument can log thousands of ticks/day, so any fixed cap (whichever end
-    of the range it takes from) always truncates the OTHER end silently. Confirmed
-    live both ways: capping to the earliest 1000 rows made an actively-streaming
-    token look like it had stopped hours before it had; capping to the most recent
-    1000 rows then hid the whole morning for a single-token query on a busy day.
-    Real pagination means the full range is always reachable, never guessed at.
+    Standard offset pagination (page number + COUNT), not a fixed row cap and not
+    keyset pagination — a real datatable needs First/Prev/Next/Last and jump-to-page,
+    which both require knowing the total row count and being able to skip to an
+    arbitrary offset; keyset ("seek") pagination can only step one page at a time and
+    was dropped in favor of this. The COUNT + OFFSET cost is acceptable here because
+    every query is already scoped to one account (and usually one token) plus a date
+    range — realistic page counts land in the hundreds even on the busiest single
+    instrument, not the millions this pattern would be unsafe at on an unscoped table
+    scan.
 
-    `after` (optional): an opaque "<time.isoformat()>|<id>" cursor from a previous
-    response's `next_cursor` — returns the page starting just after it.
+    `page` (1-based, default 1) and `page_size` (default/max DATA_EXPLORER_PAGE_SIZE).
     """
     qs = _data_explorer_queryset(request).order_by('time', 'id')
 
-    after = request.GET.get('after')
-    if after:
-        try:
-            after_time_str, after_id_str = after.rsplit('|', 1)
-            after_time = parse_datetime(after_time_str)
-            after_id = int(after_id_str)
-            if after_time is not None:
-                qs = qs.filter(Q(time__gt=after_time) | (Q(time=after_time) & Q(id__gt=after_id)))
-        except (ValueError, TypeError):
-            pass  # malformed cursor — fall back to the start of the range
+    try:
+        page_size = min(int(request.GET.get('page_size', DATA_EXPLORER_PAGE_SIZE)), DATA_EXPLORER_PAGE_SIZE)
+        page_size = max(page_size, 1)
+    except (TypeError, ValueError):
+        page_size = DATA_EXPLORER_PAGE_SIZE
 
-    page = list(qs[:DATA_EXPLORER_PAGE_SIZE + 1])
-    has_more = len(page) > DATA_EXPLORER_PAGE_SIZE
-    page = page[:DATA_EXPLORER_PAGE_SIZE]
+    try:
+        page = max(int(request.GET.get('page', 1)), 1)
+    except (TypeError, ValueError):
+        page = 1
 
-    next_cursor = None
-    if has_more and page:
-        last = page[-1]
-        next_cursor = f'{last.time.isoformat()}|{last.id}'
+    total_count = qs.count()
+    total_pages = max((total_count + page_size - 1) // page_size, 1)
+    page = min(page, total_pages)
+
+    offset = (page - 1) * page_size
+    rows = list(qs[offset:offset + page_size])
 
     return JsonResponse({
-        'next_cursor': next_cursor,
+        'page': page,
+        'page_size': page_size,
+        'total_count': total_count,
+        'total_pages': total_pages,
         'results': [
             {
                 # t.time is stored/queried in UTC (Django's USE_TZ convention) —
@@ -183,7 +184,7 @@ def data_explorer_query(request):
                 'ltp': str(t.ltp),
                 'volume': t.volume,
             }
-            for t in page
+            for t in rows
         ],
     })
 

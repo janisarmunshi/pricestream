@@ -28,10 +28,16 @@
         <tr><td colspan="7">Select an account and query to see ticks.</td></tr>
     </tbody>
 </table>
-<div class="card" style="display:flex;align-items:center;gap:0.75rem;">
+<div class="card" style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+    <button class="btn" id="first-btn" type="button" disabled>&laquo; First</button>
     <button class="btn" id="prev-btn" type="button" disabled>&larr; Prev</button>
+    <span id="page-info" style="color:#8b949e;font-size:0.85rem;margin:0 0.5rem;"></span>
     <button class="btn" id="next-btn" type="button" disabled>Next &rarr;</button>
-    <span id="page-info" style="color:#8b949e;font-size:0.85rem;"></span>
+    <button class="btn" id="last-btn" type="button" disabled>Last &raquo;</button>
+    <span style="margin-left:0.75rem;">
+        Go to page: <input type="number" id="jump-page" min="1" style="width:5rem;">
+        <button class="btn" id="jump-btn" type="button">Go</button>
+    </span>
 </div>
 
 <script>
@@ -39,20 +45,18 @@
     const form = document.getElementById('explorer-form');
     const resultsBody = document.getElementById('results-body');
     const exportLink = document.getElementById('export-link');
+    const firstBtn = document.getElementById('first-btn');
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
+    const lastBtn = document.getElementById('last-btn');
+    const jumpInput = document.getElementById('jump-page');
+    const jumpBtn = document.getElementById('jump-btn');
     const pageInfo = document.getElementById('page-info');
 
-    // Keyset pagination: cursorStack[i] is the "after" cursor that produced the
-    // page currently showing at stack depth i (cursorStack[0] is always null, the
-    // first page). Prev just pops back to an already-fetched cursor rather than
-    // re-deriving a "previous page" server-side, which keyset pagination doesn't
-    // support in reverse without a second query direction.
-    let cursorStack = [null];
-    let pageIndex = 0;
-    let nextCursor = null;
+    let currentPage = 1;
+    let totalPages = 1;
 
-    function buildParams(afterCursor) {
+    function buildParams(page) {
         const params = new URLSearchParams();
         const accountId = document.getElementById('account_id').value;
         const token = document.getElementById('token').value;
@@ -62,7 +66,7 @@
         if (token) params.set('token', token);
         if (start) params.set('start', start + 'T00:00:00Z');
         if (end) params.set('end', end + 'T23:59:59Z');
-        if (afterCursor) params.set('after', afterCursor);
+        if (page) params.set('page', page);
         return params;
     }
 
@@ -72,24 +76,36 @@
         return div.innerHTML;
     }
 
-    async function fetchPage(afterCursor) {
-        const params = buildParams(afterCursor);
+    function setPagerState() {
+        firstBtn.disabled = currentPage <= 1;
+        prevBtn.disabled = currentPage <= 1;
+        nextBtn.disabled = currentPage >= totalPages;
+        lastBtn.disabled = currentPage >= totalPages;
+        jumpInput.max = totalPages;
+    }
+
+    async function fetchPage(page) {
+        const params = buildParams(page);
         exportLink.href = '{% url "data_explorer_export" %}?' + buildParams(null).toString();
 
         if (!params.get('account_id')) {
             resultsBody.innerHTML = '<tr><td colspan="7">Select an account and query to see ticks.</td></tr>';
-            prevBtn.disabled = true;
-            nextBtn.disabled = true;
+            currentPage = 1;
+            totalPages = 1;
             pageInfo.textContent = '';
+            setPagerState();
             return;
         }
 
         const resp = await fetch('{% url "data_explorer_query" %}?' + params.toString());
         const data = await resp.json();
+        currentPage = data.page;
+        totalPages = data.total_pages;
+
         if (!data.results.length) {
             resultsBody.innerHTML = '<tr><td colspan="7">No ticks found for this filter.</td></tr>';
-            nextBtn.disabled = true;
             pageInfo.textContent = 'No results';
+            setPagerState();
             return;
         }
         resultsBody.innerHTML = data.results.map(function (t) {
@@ -104,30 +120,29 @@
                 '</tr>';
         }).join('');
 
-        nextCursor = data.next_cursor;
-        nextBtn.disabled = !nextCursor;
-        prevBtn.disabled = pageIndex === 0;
-        pageInfo.textContent = 'Page ' + (pageIndex + 1) + (nextCursor ? '' : ' (last page)');
+        pageInfo.textContent = 'Page ' + data.page + ' of ' + data.total_pages + ' (' + data.total_count + ' rows)';
+        jumpInput.value = data.page;
+        setPagerState();
     }
 
     async function runQuery(e) {
         if (e) e.preventDefault();
-        cursorStack = [null];
-        pageIndex = 0;
-        await fetchPage(null);
+        await fetchPage(1);
     }
 
-    prevBtn.addEventListener('click', async function () {
-        if (pageIndex === 0) return;
-        pageIndex -= 1;
-        await fetchPage(cursorStack[pageIndex]);
+    firstBtn.addEventListener('click', function () { fetchPage(1); });
+    prevBtn.addEventListener('click', function () { fetchPage(currentPage - 1); });
+    nextBtn.addEventListener('click', function () { fetchPage(currentPage + 1); });
+    lastBtn.addEventListener('click', function () { fetchPage(totalPages); });
+    jumpBtn.addEventListener('click', function () {
+        const target = parseInt(jumpInput.value, 10);
+        if (target >= 1) fetchPage(target);
     });
-
-    nextBtn.addEventListener('click', async function () {
-        if (!nextCursor) return;
-        pageIndex += 1;
-        cursorStack[pageIndex] = nextCursor;
-        await fetchPage(nextCursor);
+    jumpInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            jumpBtn.click();
+        }
     });
 
     form.addEventListener('submit', runQuery);
