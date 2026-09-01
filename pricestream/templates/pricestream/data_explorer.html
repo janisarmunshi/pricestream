@@ -28,14 +28,31 @@
         <tr><td colspan="7">Select an account and query to see ticks.</td></tr>
     </tbody>
 </table>
+<div class="card" style="display:flex;align-items:center;gap:0.75rem;">
+    <button class="btn" id="prev-btn" type="button" disabled>&larr; Prev</button>
+    <button class="btn" id="next-btn" type="button" disabled>Next &rarr;</button>
+    <span id="page-info" style="color:#8b949e;font-size:0.85rem;"></span>
+</div>
 
 <script>
 (function () {
     const form = document.getElementById('explorer-form');
     const resultsBody = document.getElementById('results-body');
     const exportLink = document.getElementById('export-link');
+    const prevBtn = document.getElementById('prev-btn');
+    const nextBtn = document.getElementById('next-btn');
+    const pageInfo = document.getElementById('page-info');
 
-    function buildParams() {
+    // Keyset pagination: cursorStack[i] is the "after" cursor that produced the
+    // page currently showing at stack depth i (cursorStack[0] is always null, the
+    // first page). Prev just pops back to an already-fetched cursor rather than
+    // re-deriving a "previous page" server-side, which keyset pagination doesn't
+    // support in reverse without a second query direction.
+    let cursorStack = [null];
+    let pageIndex = 0;
+    let nextCursor = null;
+
+    function buildParams(afterCursor) {
         const params = new URLSearchParams();
         const accountId = document.getElementById('account_id').value;
         const token = document.getElementById('token').value;
@@ -45,6 +62,7 @@
         if (token) params.set('token', token);
         if (start) params.set('start', start + 'T00:00:00Z');
         if (end) params.set('end', end + 'T23:59:59Z');
+        if (afterCursor) params.set('after', afterCursor);
         return params;
     }
 
@@ -54,13 +72,15 @@
         return div.innerHTML;
     }
 
-    async function runQuery(e) {
-        if (e) e.preventDefault();
-        const params = buildParams();
-        exportLink.href = '{% url "data_explorer_export" %}?' + params.toString();
+    async function fetchPage(afterCursor) {
+        const params = buildParams(afterCursor);
+        exportLink.href = '{% url "data_explorer_export" %}?' + buildParams(null).toString();
 
         if (!params.get('account_id')) {
             resultsBody.innerHTML = '<tr><td colspan="7">Select an account and query to see ticks.</td></tr>';
+            prevBtn.disabled = true;
+            nextBtn.disabled = true;
+            pageInfo.textContent = '';
             return;
         }
 
@@ -68,6 +88,8 @@
         const data = await resp.json();
         if (!data.results.length) {
             resultsBody.innerHTML = '<tr><td colspan="7">No ticks found for this filter.</td></tr>';
+            nextBtn.disabled = true;
+            pageInfo.textContent = 'No results';
             return;
         }
         resultsBody.innerHTML = data.results.map(function (t) {
@@ -81,11 +103,36 @@
                 '<td>' + escapeHtml(t.volume) + '</td>' +
                 '</tr>';
         }).join('');
+
+        nextCursor = data.next_cursor;
+        nextBtn.disabled = !nextCursor;
+        prevBtn.disabled = pageIndex === 0;
+        pageInfo.textContent = 'Page ' + (pageIndex + 1) + (nextCursor ? '' : ' (last page)');
     }
+
+    async function runQuery(e) {
+        if (e) e.preventDefault();
+        cursorStack = [null];
+        pageIndex = 0;
+        await fetchPage(null);
+    }
+
+    prevBtn.addEventListener('click', async function () {
+        if (pageIndex === 0) return;
+        pageIndex -= 1;
+        await fetchPage(cursorStack[pageIndex]);
+    });
+
+    nextBtn.addEventListener('click', async function () {
+        if (!nextCursor) return;
+        pageIndex += 1;
+        cursorStack[pageIndex] = nextCursor;
+        await fetchPage(nextCursor);
+    });
 
     form.addEventListener('submit', runQuery);
     exportLink.addEventListener('click', function (e) {
-        if (!buildParams().get('account_id')) {
+        if (!buildParams(null).get('account_id')) {
             e.preventDefault();
             alert('Select an account first.');
         }
@@ -93,9 +140,9 @@
     // Keep the export link's query string in sync as the user edits filters,
     // without waiting for a Query click.
     form.addEventListener('input', function () {
-        exportLink.href = '{% url "data_explorer_export" %}?' + buildParams().toString();
+        exportLink.href = '{% url "data_explorer_export" %}?' + buildParams(null).toString();
     });
-    exportLink.href = '{% url "data_explorer_export" %}?' + buildParams().toString();
+    exportLink.href = '{% url "data_explorer_export" %}?' + buildParams(null).toString();
 })();
 </script>
 {% endblock %}

@@ -2,6 +2,7 @@ import csv
 from datetime import datetime, timezone as dt_timezone
 
 from django.contrib.auth.decorators import login_required
+from django.db.models import Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -122,6 +123,9 @@ def data_explorer(request):
     return render(request, 'pricestream/data_explorer.html', {'accounts': accounts, 'today': today})
 
 
+DATA_EXPLORER_PAGE_SIZE = 500
+
+
 @login_required
 @require_GET
 def data_explorer_query(request):
@@ -129,34 +133,59 @@ def data_explorer_query(request):
     the CSV export and the external API's GET /api/v1/ticks/, one query
     implementation shared by all three.
 
-    query_ticks() orders ascending (time), which is correct for a full CSV
-    export/report but wrong for this preview: taking the first 1000 rows of a busy
-    trading day returns the EARLIEST ticks, silently truncating the view partway
-    through the afternoon and making it look like logging stopped hours ago when it
-    hadn't — confirmed live (a token still updating at 20:03 IST showed no data past
-    ~19:15 in this view, purely because ~1000 ticks across the day's subscribed
-    instruments had already accumulated by then). Reverse in Python rather than
-    change query_ticks' own ordering, since the CSV export and the external API both
-    depend on it staying chronological.
+    Real keyset ("seek") pagination on (time, id), not a fixed row cap — a single
+    busy instrument can log thousands of ticks/day, so any fixed cap (whichever end
+    of the range it takes from) always truncates the OTHER end silently. Confirmed
+    live both ways: capping to the earliest 1000 rows made an actively-streaming
+    token look like it had stopped hours before it had; capping to the most recent
+    1000 rows then hid the whole morning for a single-token query on a busy day.
+    Real pagination means the full range is always reachable, never guessed at.
+
+    `after` (optional): an opaque "<time.isoformat()>|<id>" cursor from a previous
+    response's `next_cursor` — returns the page starting just after it.
     """
-    ticks = list(_data_explorer_queryset(request).order_by('-time')[:1000])
-    ticks.reverse()  # chronological in the table, only the SELECTION was "latest 1000"
-    return JsonResponse({'results': [
-        {
-            # t.time is stored/queried in UTC (Django's USE_TZ convention) — convert
-            # to IST (settings.TIME_ZONE) before rendering, same as DRF's
-            # DateTimeField already does automatically for the external API. Left as
-            # plain .isoformat() before, this showed raw UTC with a +00:00 offset.
-            'time': timezone.localtime(t.time).isoformat(),
-            'account_id': t.account_id,
-            'exch_seg': t.exch_seg,
-            'token': t.token,
-            'symbol': t.symbol,
-            'ltp': str(t.ltp),
-            'volume': t.volume,
-        }
-        for t in ticks
-    ]})
+    qs = _data_explorer_queryset(request).order_by('time', 'id')
+
+    after = request.GET.get('after')
+    if after:
+        try:
+            after_time_str, after_id_str = after.rsplit('|', 1)
+            after_time = parse_datetime(after_time_str)
+            after_id = int(after_id_str)
+            if after_time is not None:
+                qs = qs.filter(Q(time__gt=after_time) | (Q(time=after_time) & Q(id__gt=after_id)))
+        except (ValueError, TypeError):
+            pass  # malformed cursor — fall back to the start of the range
+
+    page = list(qs[:DATA_EXPLORER_PAGE_SIZE + 1])
+    has_more = len(page) > DATA_EXPLORER_PAGE_SIZE
+    page = page[:DATA_EXPLORER_PAGE_SIZE]
+
+    next_cursor = None
+    if has_more and page:
+        last = page[-1]
+        next_cursor = f'{last.time.isoformat()}|{last.id}'
+
+    return JsonResponse({
+        'next_cursor': next_cursor,
+        'results': [
+            {
+                # t.time is stored/queried in UTC (Django's USE_TZ convention) —
+                # convert to IST (settings.TIME_ZONE) before rendering, same as
+                # DRF's DateTimeField already does automatically for the external
+                # API. Left as plain .isoformat() before, this showed raw UTC with
+                # a +00:00 offset.
+                'time': timezone.localtime(t.time).isoformat(),
+                'account_id': t.account_id,
+                'exch_seg': t.exch_seg,
+                'token': t.token,
+                'symbol': t.symbol,
+                'ltp': str(t.ltp),
+                'volume': t.volume,
+            }
+            for t in page
+        ],
+    })
 
 
 @login_required
